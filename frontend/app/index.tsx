@@ -54,12 +54,11 @@ const COLORS = {
 
 // Emotion colors
 const EMOTION_COLORS: Record<string, string> = {
-  alegre: '#ff6b9d',
-  celosa: '#ef4444',
-  triste: '#6b7280',
-  calida: '#f472b6',
-  intensa: '#f97316',
-  protectora: '#3b82f6',
+  caliente: '#ff4757',
+  celosa: '#e84118',
+  tierna: '#ff6b9d',
+  salvaje: '#ff6348',
+  sumisa: '#e056fd',
 };
 
 export default function ElLugarUnificado() {
