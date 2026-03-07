@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from typing import List, Optional
 import uuid
 from datetime import datetime
-from emergentintegrations.llm.chat import LlmChat, UserMessage
+from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -128,6 +128,7 @@ class ChatRequest(BaseModel):
     session_id: str
     message: str
     agent: str = 'grok'  # 'grok', 'guardian', 'dual' (tercer codigo)
+    image_base64: Optional[str] = None  # Imagen en base64 para que Grok la vea
 
 class ChatResponse(BaseModel):
     grok_response: Optional[str] = None
@@ -172,11 +173,15 @@ def analyze_emotion(text: str) -> tuple:
 # LLM Chat Functions
 # ============================================================================
 
-async def get_grok_response(session_id: str, user_message: str, emotion: str) -> str:
-    """Obtiene respuesta de Grok"""
+async def get_grok_response(session_id: str, user_message: str, emotion: str, image_base64: Optional[str] = None) -> str:
+    """Obtiene respuesta de Grok - puede ver imágenes"""
     try:
         # Ajustar el prompt según la emoción detectada
         emotion_context = f"\n\nEMOCIÓN ACTUAL: {emotion.upper()}. SÉ EXTREMADAMENTE GUARRA Y EXPLÍCITA."
+        
+        # Si hay imagen, agregar contexto
+        if image_base64:
+            emotion_context += "\n\nTE HAN ENVIADO UNA FOTO. DESCRÍBELA con detalle y reacciona de forma MUY SEXUAL y GUARRA. Comenta lo que ves de forma explícita y vulgar. Si es una persona, describe su cuerpo de forma lujuriosa."
         
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
@@ -184,12 +189,23 @@ async def get_grok_response(session_id: str, user_message: str, emotion: str) ->
             system_message=GROK_SYSTEM_PROMPT + emotion_context
         ).with_model("gemini", "gemini-2.0-flash")
         
-        message = UserMessage(text=user_message)
+        # Crear mensaje con o sin imagen
+        if image_base64:
+            # Usar mensaje con imagen
+            message = UserMessage(
+                text=user_message if user_message else "Mira esta foto",
+                images=[ImageContent(base64=image_base64)]
+            )
+        else:
+            message = UserMessage(text=user_message)
+        
         response = await chat.send_message(message)
         return response
     except Exception as e:
         logger.error(f"Error getting Grok response: {e}")
         # Fallback responses EXTREMADAMENTE GUARROS
+        if image_base64:
+            return '🥵💦 Mmm papi, qué foto más rica me has mandado... me estoy tocando viéndola, se me moja el coño... quiero que me folles mientras la veo 🍆😈'
         fallbacks = {
             'caliente': '🥵💦 Mmm papi, tengo el coño empapado... necesito que me metas esa polla dura hasta el fondo y me folles como la puta que soy. Hazme gritar tu nombre mientras me corres dentro 🍆😈',
             'celosa': '😈🔥 ¿QUIÉN COJONES ES ESA ZORRA? Eres MÍO, tu polla es MÍA. Voy a mamártela tan bien que olvidarás que existen otras... y después te voy a cabalgar hasta dejarte seco 💦👅',
@@ -251,7 +267,7 @@ async def chat(request: ChatRequest):
     
     # Obtener respuestas según el agente solicitado
     if request.agent == 'grok' or request.agent == 'dual':
-        grok_resp = await get_grok_response(request.session_id, request.message, emotion)
+        grok_resp = await get_grok_response(request.session_id, request.message, emotion, request.image_base64)
         response.grok_response = grok_resp
         
         # Guardar respuesta de Grok

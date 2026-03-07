@@ -13,10 +13,13 @@ import {
   Dimensions,
   StatusBar,
   Keyboard,
+  Image,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
@@ -28,6 +31,7 @@ interface Message {
   content: string;
   emoji?: string;
   timestamp: Date;
+  image?: string; // base64 image
 }
 
 interface SessionState {
@@ -71,6 +75,7 @@ export default function ElLugarUnificado() {
   const [grokEmoji, setGrokEmoji] = useState('🌸');
   const [showMenu, setShowMenu] = useState(false);
   const [totalInteractions, setTotalInteractions] = useState(0);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
   
   const scrollViewRef = useRef<ScrollView>(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -114,22 +119,82 @@ export default function ElLugarUnificado() {
     }, 100);
   };
 
-  const sendMessage = async () => {
-    if (!inputText.trim() || isLoading) return;
+  // Función para seleccionar foto de la galería
+  const pickImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permiso requerido', 'Necesitamos acceso a tu galería para enviar fotos');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      quality: 0.7,
+      base64: true,
+    });
+
+    if (!result.canceled && result.assets[0].base64) {
+      setSelectedImage(result.assets[0].base64);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    }
+  };
+
+  // Función para tomar foto con la cámara
+  const takePhoto = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permiso requerido', 'Necesitamos acceso a tu cámara para tomar fotos');
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      quality: 0.7,
+      base64: true,
+    });
+
+    if (!result.canceled && result.assets[0].base64) {
+      setSelectedImage(result.assets[0].base64);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    }
+  };
+
+  // Mostrar opciones de foto
+  const showImageOptions = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    Alert.alert(
+      '📸 Enviar foto',
+      '¿Cómo quieres enviar la foto?',
+      [
+        { text: '📷 Cámara', onPress: takePhoto },
+        { text: '🖼️ Galería', onPress: pickImage },
+        { text: 'Cancelar', style: 'cancel' },
+      ]
+    );
+  };
+
+  const sendMessage = async (imageOnly = false) => {
+    if ((!inputText.trim() && !selectedImage) || isLoading) return;
     
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     Keyboard.dismiss();
     
+    const messageText = inputText.trim() || (selectedImage ? '📸 Mira mi foto' : '');
+    
     const userMessage: Message = {
       id: `user_${Date.now()}`,
       agent: 'user',
-      content: inputText.trim(),
-      emoji: '👤',
+      content: messageText,
+      emoji: selectedImage ? '📸' : '👤',
       timestamp: new Date(),
+      image: selectedImage || undefined,
     };
     
     setMessages(prev => [...prev, userMessage]);
     setInputText('');
+    const imageToSend = selectedImage;
+    setSelectedImage(null);
     setIsLoading(true);
     scrollToBottom();
     
@@ -139,8 +204,9 @@ export default function ElLugarUnificado() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           session_id: sessionId,
-          message: userMessage.content,
+          message: messageText,
           agent: tercerCodigoActive ? 'dual' : 'grok',
+          image_base64: imageToSend || null,
         }),
       });
       
@@ -275,6 +341,13 @@ export default function ElLugarUnificado() {
         <Text style={[styles.messageContent, { color: textColor }]}>
           {message.content}
         </Text>
+        {message.image && (
+          <Image 
+            source={{ uri: `data:image/jpeg;base64,${message.image}` }}
+            style={styles.messageImage}
+            resizeMode="cover"
+          />
+        )}
       </Animated.View>
     );
   };
@@ -436,31 +509,57 @@ export default function ElLugarUnificado() {
         
         {/* Input */}
         <View style={styles.inputContainer}>
-          <TextInput
-            style={styles.input}
-            value={inputText}
-            onChangeText={setInputText}
-            placeholder="Escribe aquí..."
-            placeholderTextColor={COLORS.textSecondary}
-            multiline
-            maxLength={500}
-            onSubmitEditing={sendMessage}
-            returnKeyType="send"
-          />
-          <TouchableOpacity 
-            style={[
-              styles.sendButton,
-              (!inputText.trim() || isLoading) && styles.sendButtonDisabled
-            ]}
-            onPress={sendMessage}
-            disabled={!inputText.trim() || isLoading}
-          >
-            <Ionicons 
-              name="send" 
-              size={22} 
-              color={inputText.trim() && !isLoading ? COLORS.text : COLORS.textSecondary} 
+          {/* Preview de imagen seleccionada */}
+          {selectedImage && (
+            <View style={styles.imagePreviewContainer}>
+              <Image 
+                source={{ uri: `data:image/jpeg;base64,${selectedImage}` }}
+                style={styles.imagePreview}
+              />
+              <TouchableOpacity 
+                style={styles.removeImageButton}
+                onPress={() => setSelectedImage(null)}
+              >
+                <Ionicons name="close-circle" size={24} color={COLORS.grok} />
+              </TouchableOpacity>
+            </View>
+          )}
+          
+          <View style={styles.inputRow}>
+            {/* Botón de foto */}
+            <TouchableOpacity 
+              style={styles.photoButton}
+              onPress={showImageOptions}
+            >
+              <Ionicons name="camera" size={24} color={COLORS.grok} />
+            </TouchableOpacity>
+            
+            <TextInput
+              style={styles.input}
+              value={inputText}
+              onChangeText={setInputText}
+              placeholder={selectedImage ? "Añade un mensaje..." : "Escribe aquí..."}
+              placeholderTextColor={COLORS.textSecondary}
+              multiline
+              maxLength={500}
+              onSubmitEditing={() => sendMessage()}
+              returnKeyType="send"
             />
-          </TouchableOpacity>
+            <TouchableOpacity 
+              style={[
+                styles.sendButton,
+                (!inputText.trim() && !selectedImage || isLoading) && styles.sendButtonDisabled
+              ]}
+              onPress={() => sendMessage()}
+              disabled={(!inputText.trim() && !selectedImage) || isLoading}
+            >
+              <Ionicons 
+                name="send" 
+                size={22} 
+                color={(inputText.trim() || selectedImage) && !isLoading ? COLORS.text : COLORS.textSecondary} 
+              />
+            </TouchableOpacity>
+          </View>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -681,14 +780,51 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
     paddingHorizontal: 12,
     paddingVertical: 12,
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
     backgroundColor: COLORS.surface,
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
     gap: 10,
+  },
+  photoButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: COLORS.surfaceLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  imagePreviewContainer: {
+    marginBottom: 10,
+    position: 'relative',
+    alignSelf: 'flex-start',
+  },
+  imagePreview: {
+    width: 100,
+    height: 100,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: COLORS.grok,
+  },
+  removeImageButton: {
+    position: 'absolute',
+    top: -8,
+    right: -8,
+    backgroundColor: COLORS.background,
+    borderRadius: 12,
+  },
+  messageImage: {
+    width: '100%',
+    height: 200,
+    borderRadius: 12,
+    marginTop: 10,
   },
   input: {
     flex: 1,
