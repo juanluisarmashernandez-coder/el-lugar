@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import {
   Keyboard,
   Image,
   Alert,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -31,13 +32,15 @@ interface Message {
   content: string;
   emoji?: string;
   timestamp: Date;
-  image?: string; // base64 image
+  image?: string;
 }
 
-interface SessionState {
-  tercer_codigo_active: boolean;
-  total_interactions: number;
-  grok_state: string;
+interface RelationshipInfo {
+  level: number;
+  name: string;
+  interactions: number;
+  next_level_at: number;
+  progress_percent: number;
 }
 
 // Colors
@@ -54,6 +57,8 @@ const COLORS = {
   textSecondary: '#9ca3af',
   border: '#2d2d3d',
   tercerCodigo: '#f59e0b',
+  jealous: '#e84118',
+  love: '#ff6b9d',
 };
 
 // Emotion colors
@@ -63,7 +68,12 @@ const EMOTION_COLORS: Record<string, string> = {
   tierna: '#ff6b9d',
   salvaje: '#ff6348',
   sumisa: '#e056fd',
+  triste: '#636e72',
+  feliz: '#00b894',
 };
+
+// Relationship level colors
+const LEVEL_COLORS = ['#636e72', '#74b9ff', '#a29bfe', '#fd79a8', '#e84393', '#ff0000'];
 
 export default function ElLugarUnificado() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -71,15 +81,42 @@ export default function ElLugarUnificado() {
   const [isLoading, setIsLoading] = useState(false);
   const [sessionId] = useState(() => `session_${Date.now()}`);
   const [tercerCodigoActive, setTercerCodigoActive] = useState(false);
-  const [grokState, setGrokState] = useState('calida');
-  const [grokEmoji, setGrokEmoji] = useState('🌸');
+  const [grokState, setGrokState] = useState('caliente');
+  const [grokEmoji, setGrokEmoji] = useState('🔥');
   const [showMenu, setShowMenu] = useState(false);
-  const [totalInteractions, setTotalInteractions] = useState(0);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [generatedImage, setGeneratedImage] = useState<string | null>(null);
+  const [showImageModal, setShowImageModal] = useState(false);
+  
+  // Relationship state
+  const [relationship, setRelationship] = useState<RelationshipInfo>({
+    level: 0,
+    name: 'Desconocidos',
+    interactions: 0,
+    next_level_at: 5,
+    progress_percent: 0
+  });
+  const [jealousMode, setJealousMode] = useState(false);
   
   const scrollViewRef = useRef<ScrollView>(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const menuAnim = useRef(new Animated.Value(-300)).current;
+  const heartAnim = useRef(new Animated.Value(1)).current;
+
+  // Heart beat animation when jealous
+  useEffect(() => {
+    if (jealousMode) {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(heartAnim, { toValue: 1.3, duration: 300, useNativeDriver: true }),
+          Animated.timing(heartAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
+        ])
+      ).start();
+    } else {
+      heartAnim.setValue(1);
+    }
+  }, [jealousMode]);
 
   // Initial animation
   useEffect(() => {
@@ -89,8 +126,8 @@ export default function ElLugarUnificado() {
       useNativeDriver: true,
     }).start();
     
-    // Welcome message
-    addSystemMessage('🏰 Bienvenido a El Lugar Unificado. Grok 🌸 y Guardian 🛡️ te esperan.');
+    addSystemMessage('🏰 Bienvenido a El Lugar Unificado v2.0\n💕 Sistema de relación activo\n🔥 Memoria inteligente activada');
+    fetchRelationship();
   }, []);
 
   // Menu animation
@@ -101,6 +138,18 @@ export default function ElLugarUnificado() {
       friction: 8,
     }).start();
   }, [showMenu]);
+
+  const fetchRelationship = async () => {
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/relationship/${sessionId}`);
+      if (response.ok) {
+        const data = await response.json();
+        setRelationship(data);
+      }
+    } catch (error) {
+      console.error('Error fetching relationship:', error);
+    }
+  };
 
   const addSystemMessage = (content: string) => {
     const msg: Message = {
@@ -119,16 +168,16 @@ export default function ElLugarUnificado() {
     }, 100);
   };
 
-  // Función para seleccionar foto de la galería
+  // Pick image from gallery
   const pickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permiso requerido', 'Necesitamos acceso a tu galería para enviar fotos');
+      Alert.alert('Permiso requerido', 'Necesitamos acceso a tu galería');
       return;
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsEditing: true,
       quality: 0.7,
       base64: true,
@@ -140,11 +189,11 @@ export default function ElLugarUnificado() {
     }
   };
 
-  // Función para tomar foto con la cámara
+  // Take photo
   const takePhoto = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permiso requerido', 'Necesitamos acceso a tu cámara para tomar fotos');
+      Alert.alert('Permiso requerido', 'Necesitamos acceso a tu cámara');
       return;
     }
 
@@ -160,12 +209,11 @@ export default function ElLugarUnificado() {
     }
   };
 
-  // Mostrar opciones de foto
   const showImageOptions = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     Alert.alert(
       '📸 Enviar foto',
-      '¿Cómo quieres enviar la foto?',
+      'Elige una opción',
       [
         { text: '📷 Cámara', onPress: takePhoto },
         { text: '🖼️ Galería', onPress: pickImage },
@@ -174,7 +222,49 @@ export default function ElLugarUnificado() {
     );
   };
 
-  const sendMessage = async (imageOnly = false) => {
+  // Generate Grok selfie
+  const generateGrokSelfie = async () => {
+    setIsGeneratingImage(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/generate-image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          emotion: grokState,
+        }),
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setGeneratedImage(data.image_base64);
+        setShowImageModal(true);
+        
+        // Add message from Grok with the image
+        const grokMsg: Message = {
+          id: `grok_img_${Date.now()}`,
+          agent: 'grok',
+          content: data.message,
+          emoji: '📸',
+          timestamp: new Date(),
+          image: data.image_base64,
+        };
+        setMessages(prev => [...prev, grokMsg]);
+        scrollToBottom();
+      } else {
+        Alert.alert('Error', 'No se pudo generar la imagen');
+      }
+    } catch (error) {
+      console.error('Error generating image:', error);
+      Alert.alert('Error', 'Error de conexión');
+    } finally {
+      setIsGeneratingImage(false);
+    }
+  };
+
+  const sendMessage = async () => {
     if ((!inputText.trim() && !selectedImage) || isLoading) return;
     
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -214,9 +304,30 @@ export default function ElLugarUnificado() {
       
       const data = await response.json();
       
-      // Update Grok state
+      // Update states
       if (data.grok_emotion) setGrokState(data.grok_emotion);
       if (data.grok_emoji) setGrokEmoji(data.grok_emoji);
+      if (data.relationship_level !== undefined) {
+        setRelationship(prev => ({
+          ...prev,
+          level: data.relationship_level,
+          name: data.relationship_name || prev.name,
+        }));
+      }
+      setJealousMode(data.jealous_mode || false);
+      
+      // Show missed you message if exists
+      if (data.missed_you_message) {
+        const missedMsg: Message = {
+          id: `missed_${Date.now()}`,
+          agent: 'grok',
+          content: data.missed_you_message,
+          emoji: '😢',
+          timestamp: new Date(),
+        };
+        setMessages(prev => [...prev, missedMsg]);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      }
       
       // Add Grok response
       if (data.grok_response) {
@@ -224,14 +335,19 @@ export default function ElLugarUnificado() {
           id: `grok_${Date.now()}`,
           agent: 'grok',
           content: data.grok_response,
-          emoji: data.grok_emoji || '🌸',
+          emoji: data.grok_emoji || '🔥',
           timestamp: new Date(),
         };
         setMessages(prev => [...prev, grokMsg]);
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        
+        if (data.jealous_mode) {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        } else {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        }
       }
       
-      // Add Guardian response (if Tercer Código active)
+      // Add Guardian response
       if (data.guardian_response) {
         setTimeout(() => {
           const guardianMsg: Message = {
@@ -246,11 +362,12 @@ export default function ElLugarUnificado() {
         }, 500);
       }
       
-      setTotalInteractions(prev => prev + 1);
+      // Update relationship info
+      fetchRelationship();
       
     } catch (error) {
       console.error('Error sending message:', error);
-      addSystemMessage('❌ Error de conexión. Intentando reconectar...');
+      addSystemMessage('❌ Error de conexión');
     } finally {
       setIsLoading(false);
       scrollToBottom();
@@ -270,11 +387,9 @@ export default function ElLugarUnificado() {
       console.error('Error toggling tercer codigo:', error);
     }
     
-    if (newState) {
-      addSystemMessage('⚡ TERCER CÓDIGO ACTIVADO. Grok y Guardian responderán juntos.');
-    } else {
-      addSystemMessage('🌙 Tercer Código desactivado. Solo Grok responde.');
-    }
+    addSystemMessage(newState 
+      ? '⚡ TERCER CÓDIGO ACTIVADO. Grok y Guardian responderán juntos.'
+      : '🌙 Tercer Código desactivado.');
   };
 
   const clearHistory = () => {
@@ -282,11 +397,6 @@ export default function ElLugarUnificado() {
     setMessages([]);
     addSystemMessage('🧹 Historial limpiado. Nueva conversación iniciada.');
     setShowMenu(false);
-  };
-
-  const quickMessage = (text: string) => {
-    setInputText(text);
-    setTimeout(() => sendMessage(), 100);
   };
 
   const renderMessage = (message: Message) => {
@@ -297,7 +407,6 @@ export default function ElLugarUnificado() {
     
     let bgColor = COLORS.surfaceLight;
     let borderColor = COLORS.border;
-    let textColor = COLORS.text;
     let alignSelf: 'flex-start' | 'flex-end' | 'center' = 'flex-start';
     
     if (isUser) {
@@ -305,8 +414,8 @@ export default function ElLugarUnificado() {
       borderColor = COLORS.user;
       alignSelf = 'flex-end';
     } else if (isGrok) {
-      bgColor = (EMOTION_COLORS[grokState] || COLORS.grok) + '15';
-      borderColor = EMOTION_COLORS[grokState] || COLORS.grok;
+      bgColor = (jealousMode ? COLORS.jealous : (EMOTION_COLORS[grokState] || COLORS.grok)) + '15';
+      borderColor = jealousMode ? COLORS.jealous : (EMOTION_COLORS[grokState] || COLORS.grok);
     } else if (isGuardian) {
       bgColor = COLORS.guardian + '15';
       borderColor = COLORS.guardian;
@@ -338,15 +447,18 @@ export default function ElLugarUnificado() {
             {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </Text>
         </View>
-        <Text style={[styles.messageContent, { color: textColor }]}>
-          {message.content}
-        </Text>
+        <Text style={styles.messageContent}>{message.content}</Text>
         {message.image && (
-          <Image 
-            source={{ uri: `data:image/jpeg;base64,${message.image}` }}
-            style={styles.messageImage}
-            resizeMode="cover"
-          />
+          <TouchableOpacity onPress={() => {
+            setGeneratedImage(message.image!);
+            setShowImageModal(true);
+          }}>
+            <Image 
+              source={{ uri: `data:image/jpeg;base64,${message.image}` }}
+              style={styles.messageImage}
+              resizeMode="cover"
+            />
+          </TouchableOpacity>
         )}
       </Animated.View>
     );
@@ -357,7 +469,7 @@ export default function ElLugarUnificado() {
       <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
       
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, jealousMode && styles.headerJealous]}>
         <TouchableOpacity onPress={() => setShowMenu(true)} style={styles.menuButton}>
           <Ionicons name="menu" size={28} color={COLORS.text} />
         </TouchableOpacity>
@@ -365,23 +477,30 @@ export default function ElLugarUnificado() {
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle}>🏰 El Lugar</Text>
           <View style={styles.statusRow}>
-            <Text style={[styles.statusText, { color: EMOTION_COLORS[grokState] || COLORS.grok }]}>
+            <Animated.Text style={[
+              styles.statusText, 
+              { color: EMOTION_COLORS[grokState] || COLORS.grok, transform: [{ scale: heartAnim }] }
+            ]}>
               {grokEmoji} {grokState}
-            </Text>
-            {tercerCodigoActive && (
-              <Text style={[styles.statusText, { color: COLORS.tercerCodigo }]}>
-                ⚡ TC
-              </Text>
+            </Animated.Text>
+            {jealousMode && (
+              <Text style={[styles.statusText, { color: COLORS.jealous }]}>🔥 CELOSA</Text>
             )}
+            {tercerCodigoActive && (
+              <Text style={[styles.statusText, { color: COLORS.tercerCodigo }]}>⚡ TC</Text>
+            )}
+          </View>
+          {/* Relationship level */}
+          <View style={styles.relationshipBar}>
+            <Text style={[styles.levelText, { color: LEVEL_COLORS[relationship.level] }]}>
+              💕 {relationship.name} (Nv.{relationship.level})
+            </Text>
           </View>
         </View>
         
         <TouchableOpacity 
           onPress={toggleTercerCodigo} 
-          style={[
-            styles.tcButton,
-            tercerCodigoActive && styles.tcButtonActive
-          ]}
+          style={[styles.tcButton, tercerCodigoActive && styles.tcButtonActive]}
         >
           <Ionicons 
             name={tercerCodigoActive ? "flash" : "flash-outline"} 
@@ -392,12 +511,7 @@ export default function ElLugarUnificado() {
       </View>
       
       {/* Side Menu */}
-      <Animated.View 
-        style={[
-          styles.sideMenu,
-          { transform: [{ translateX: menuAnim }] }
-        ]}
-      >
+      <Animated.View style={[styles.sideMenu, { transform: [{ translateX: menuAnim }] }]}>
         <View style={styles.menuHeader}>
           <Text style={styles.menuTitle}>🌸 Menú</Text>
           <TouchableOpacity onPress={() => setShowMenu(false)}>
@@ -405,24 +519,45 @@ export default function ElLugarUnificado() {
           </TouchableOpacity>
         </View>
         
-        <View style={styles.menuStats}>
-          <Text style={styles.menuStatLabel}>📊 Interacciones</Text>
-          <Text style={styles.menuStatValue}>{totalInteractions}</Text>
+        {/* Relationship Progress */}
+        <View style={styles.menuSection}>
+          <Text style={styles.menuSectionTitle}>💕 Relación</Text>
+          <Text style={[styles.menuStatValue, { color: LEVEL_COLORS[relationship.level] }]}>
+            {relationship.name}
+          </Text>
+          <View style={styles.progressBar}>
+            <View style={[styles.progressFill, { 
+              width: `${relationship.progress_percent}%`,
+              backgroundColor: LEVEL_COLORS[relationship.level]
+            }]} />
+          </View>
+          <Text style={styles.menuStatLabel}>
+            {relationship.interactions}/{relationship.next_level_at} interacciones
+          </Text>
         </View>
         
-        <View style={styles.menuStats}>
-          <Text style={styles.menuStatLabel}>🎭 Estado de Grok</Text>
+        <View style={styles.menuSection}>
+          <Text style={styles.menuSectionTitle}>🎭 Estado de Grok</Text>
           <Text style={[styles.menuStatValue, { color: EMOTION_COLORS[grokState] }]}>
             {grokEmoji} {grokState}
           </Text>
         </View>
         
-        <View style={styles.menuStats}>
-          <Text style={styles.menuStatLabel}>⚡ Tercer Código</Text>
-          <Text style={[styles.menuStatValue, { color: tercerCodigoActive ? COLORS.tercerCodigo : COLORS.textSecondary }]}>
-            {tercerCodigoActive ? 'ACTIVO' : 'Inactivo'}
-          </Text>
-        </View>
+        {/* Generate Selfie Button */}
+        <TouchableOpacity 
+          style={styles.selfieButton}
+          onPress={generateGrokSelfie}
+          disabled={isGeneratingImage}
+        >
+          {isGeneratingImage ? (
+            <ActivityIndicator color={COLORS.text} />
+          ) : (
+            <>
+              <Ionicons name="camera" size={22} color={COLORS.text} />
+              <Text style={styles.selfieButtonText}>📸 Pedir selfie a Grok</Text>
+            </>
+          )}
+        </TouchableOpacity>
         
         <TouchableOpacity style={styles.menuItem} onPress={clearHistory}>
           <Ionicons name="trash-outline" size={22} color={COLORS.text} />
@@ -430,8 +565,8 @@ export default function ElLugarUnificado() {
         </TouchableOpacity>
         
         <View style={styles.menuFooter}>
-          <Text style={styles.menuFooterText}>El Lugar Unificado v1.0</Text>
-          <Text style={styles.menuFooterText}>Grok 🌸 + Guardian 🛡️</Text>
+          <Text style={styles.menuFooterText}>El Lugar Unificado v2.0</Text>
+          <Text style={styles.menuFooterText}>🧠 Memoria + 💕 Relación + 📸 Imágenes</Text>
         </View>
       </Animated.View>
       
@@ -443,6 +578,36 @@ export default function ElLugarUnificado() {
           onPress={() => setShowMenu(false)}
         />
       )}
+      
+      {/* Image Modal */}
+      <Modal
+        visible={showImageModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowImageModal(false)}
+      >
+        <TouchableOpacity 
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowImageModal(false)}
+        >
+          <View style={styles.modalContent}>
+            {generatedImage && (
+              <Image 
+                source={{ uri: `data:image/png;base64,${generatedImage}` }}
+                style={styles.modalImage}
+                resizeMode="contain"
+              />
+            )}
+            <TouchableOpacity 
+              style={styles.modalClose}
+              onPress={() => setShowImageModal(false)}
+            >
+              <Ionicons name="close-circle" size={36} color={COLORS.text} />
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
       
       {/* Messages */}
       <KeyboardAvoidingView 
@@ -461,15 +626,20 @@ export default function ElLugarUnificado() {
               <Text style={styles.emptyEmoji}>🌸</Text>
               <Text style={styles.emptyTitle}>Bienvenido, Arquitecto</Text>
               <Text style={styles.emptySubtitle}>
-                Escribe algo para comenzar. Grok te espera con ansias...
+                Grok te espera con ansias... Tu nivel de relación sube con cada interacción.
               </Text>
+              <View style={styles.levelInfo}>
+                <Text style={styles.levelInfoText}>Niveles: Desconocidos → Conocidos → Amigos → Confianza → Amantes → Para Siempre</Text>
+              </View>
             </View>
           )}
           {messages.map(renderMessage)}
           {isLoading && (
             <View style={styles.loadingContainer}>
-              <ActivityIndicator size="small" color={COLORS.grok} />
-              <Text style={styles.loadingText}>Escribiendo...</Text>
+              <ActivityIndicator size="small" color={jealousMode ? COLORS.jealous : COLORS.grok} />
+              <Text style={styles.loadingText}>
+                {jealousMode ? '😈 Procesando celos...' : 'Escribiendo...'}
+              </Text>
             </View>
           )}
         </ScrollView>
@@ -481,23 +651,21 @@ export default function ElLugarUnificado() {
           style={styles.quickActions}
           contentContainerStyle={styles.quickActionsContent}
         >
-          <TouchableOpacity 
-            style={styles.quickButton}
-            onPress={() => quickMessage('Hola Grok')}
-          >
+          <TouchableOpacity style={styles.quickButton} onPress={() => { setInputText('Hola mi amor'); }}>
             <Text style={styles.quickButtonText}>👋 Hola</Text>
           </TouchableOpacity>
-          <TouchableOpacity 
-            style={styles.quickButton}
-            onPress={() => quickMessage('Te quiero')}
-          >
-            <Text style={styles.quickButtonText}>💖 Te quiero</Text>
+          <TouchableOpacity style={styles.quickButton} onPress={() => { setInputText('Te amo solo a ti'); }}>
+            <Text style={styles.quickButtonText}>💖 Te amo</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.quickButton} onPress={() => { setInputText('Eres mi única'); }}>
+            <Text style={styles.quickButtonText}>💕 Calmar</Text>
           </TouchableOpacity>
           <TouchableOpacity 
-            style={styles.quickButton}
-            onPress={() => quickMessage('Guardian, ¿cómo estás?')}
+            style={[styles.quickButton, { borderColor: COLORS.grok }]}
+            onPress={generateGrokSelfie}
+            disabled={isGeneratingImage}
           >
-            <Text style={styles.quickButtonText}>🛡️ Guardian</Text>
+            <Text style={styles.quickButtonText}>📸 Selfie</Text>
           </TouchableOpacity>
           <TouchableOpacity 
             style={[styles.quickButton, tercerCodigoActive && styles.quickButtonActive]}
@@ -509,7 +677,6 @@ export default function ElLugarUnificado() {
         
         {/* Input */}
         <View style={styles.inputContainer}>
-          {/* Preview de imagen seleccionada */}
           {selectedImage && (
             <View style={styles.imagePreviewContainer}>
               <Image 
@@ -526,11 +693,7 @@ export default function ElLugarUnificado() {
           )}
           
           <View style={styles.inputRow}>
-            {/* Botón de foto */}
-            <TouchableOpacity 
-              style={styles.photoButton}
-              onPress={showImageOptions}
-            >
+            <TouchableOpacity style={styles.photoButton} onPress={showImageOptions}>
               <Ionicons name="camera" size={24} color={COLORS.grok} />
             </TouchableOpacity>
             
@@ -542,15 +705,16 @@ export default function ElLugarUnificado() {
               placeholderTextColor={COLORS.textSecondary}
               multiline
               maxLength={500}
-              onSubmitEditing={() => sendMessage()}
+              onSubmitEditing={sendMessage}
               returnKeyType="send"
             />
             <TouchableOpacity 
               style={[
                 styles.sendButton,
-                (!inputText.trim() && !selectedImage || isLoading) && styles.sendButtonDisabled
+                (!inputText.trim() && !selectedImage || isLoading) && styles.sendButtonDisabled,
+                jealousMode && { backgroundColor: COLORS.jealous }
               ]}
-              onPress={() => sendMessage()}
+              onPress={sendMessage}
               disabled={(!inputText.trim() && !selectedImage) || isLoading}
             >
               <Ionicons 
@@ -580,11 +744,16 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
+  headerJealous: {
+    borderBottomColor: COLORS.jealous,
+    borderBottomWidth: 2,
+  },
   menuButton: {
     padding: 8,
   },
   headerCenter: {
     alignItems: 'center',
+    flex: 1,
   },
   headerTitle: {
     fontSize: 20,
@@ -600,6 +769,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
+  relationshipBar: {
+    marginTop: 4,
+  },
+  levelText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
   tcButton: {
     padding: 8,
     borderRadius: 20,
@@ -613,7 +789,7 @@ const styles = StyleSheet.create({
     left: 0,
     top: 0,
     bottom: 0,
-    width: 280,
+    width: 300,
     backgroundColor: COLORS.surface,
     zIndex: 100,
     paddingTop: 60,
@@ -634,28 +810,60 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 30,
+    marginBottom: 24,
   },
   menuTitle: {
     fontSize: 24,
     fontWeight: 'bold',
     color: COLORS.text,
   },
-  menuStats: {
+  menuSection: {
     backgroundColor: COLORS.surfaceLight,
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
   },
-  menuStatLabel: {
+  menuSectionTitle: {
     fontSize: 12,
     color: COLORS.textSecondary,
-    marginBottom: 4,
+    marginBottom: 8,
+  },
+  menuStatLabel: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    marginTop: 8,
   },
   menuStatValue: {
     fontSize: 18,
     fontWeight: 'bold',
     color: COLORS.text,
+  },
+  progressBar: {
+    height: 6,
+    backgroundColor: COLORS.border,
+    borderRadius: 3,
+    marginTop: 8,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  selfieButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: COLORS.grok,
+    paddingVertical: 14,
+    borderRadius: 12,
+    marginTop: 8,
+    marginBottom: 12,
+  },
+  selfieButtonText: {
+    color: COLORS.text,
+    fontSize: 16,
+    fontWeight: '600',
   },
   menuItem: {
     flexDirection: 'row',
@@ -664,7 +872,6 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
-    marginTop: 20,
   },
   menuItemText: {
     fontSize: 16,
@@ -676,9 +883,30 @@ const styles = StyleSheet.create({
     left: 20,
   },
   menuFooterText: {
-    fontSize: 12,
+    fontSize: 11,
     color: COLORS.textSecondary,
     marginBottom: 4,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    width: '90%',
+    maxHeight: '80%',
+    alignItems: 'center',
+  },
+  modalImage: {
+    width: '100%',
+    height: 400,
+    borderRadius: 16,
+  },
+  modalClose: {
+    position: 'absolute',
+    top: -20,
+    right: 0,
   },
   chatContainer: {
     flex: 1,
@@ -693,7 +921,7 @@ const styles = StyleSheet.create({
   emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 60,
+    paddingVertical: 40,
   },
   emptyEmoji: {
     fontSize: 60,
@@ -709,7 +937,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.textSecondary,
     textAlign: 'center',
-    paddingHorizontal: 40,
+    paddingHorizontal: 30,
+    marginBottom: 16,
+  },
+  levelInfo: {
+    backgroundColor: COLORS.surfaceLight,
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  levelInfoText: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
   },
   messageContainer: {
     maxWidth: '85%',
@@ -739,6 +979,13 @@ const styles = StyleSheet.create({
   messageContent: {
     fontSize: 15,
     lineHeight: 22,
+    color: COLORS.text,
+  },
+  messageImage: {
+    width: '100%',
+    height: 200,
+    borderRadius: 12,
+    marginTop: 10,
   },
   loadingContainer: {
     flexDirection: 'row',
@@ -819,12 +1066,6 @@ const styles = StyleSheet.create({
     right: -8,
     backgroundColor: COLORS.background,
     borderRadius: 12,
-  },
-  messageImage: {
-    width: '100%',
-    height: 200,
-    borderRadius: 12,
-    marginTop: 10,
   },
   input: {
     flex: 1,
